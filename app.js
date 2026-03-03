@@ -144,13 +144,19 @@ ensureBaseCanvasAttached();
 // --- Overlay canvas layer (for preview + PNG + clipboard) ---
 let baseCanvas = null;
 let overlayCanvas = document.createElement("canvas");
+overlayCanvas.dataset.role = "overlay";
 overlayCanvas.setAttribute("aria-label", "QR code with overlay");
 overlayCanvas.style.maxWidth = "100%";
 overlayCanvas.style.display = "block";
 
 function findBaseCanvas() {
-  baseCanvas = els.qrCanvas.querySelector("canvas");
+  // qr-code-styling creates its own <canvas>. We also add our overlay <canvas>.
+  // querySelector("canvas") would pick the first one (often the overlay), so we must pick the non-overlay canvas.
+  const canvases = Array.from(els.qrCanvas.querySelectorAll("canvas"));
+  baseCanvas = canvases.find((c) => c !== overlayCanvas && c.dataset.role !== "overlay") || null;
+
   if (baseCanvas) {
+    // Hide the library canvas and show overlay canvas instead
     baseCanvas.style.display = "none";
     if (!overlayCanvas.parentElement) els.qrCanvas.appendChild(overlayCanvas);
   }
