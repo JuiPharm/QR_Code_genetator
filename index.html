@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>QR Code Generator</title>
+  <link rel="stylesheet" href="./styles.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- QR Code Styling (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/qr-code-styling@1.6.0/lib/qr-code-styling.js"></script>
+</head>
+
+<body>
+  <div class="bg"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="logoMark">QR</div>
+      <div class="brandText">
+        <div class="title">QR Code Generator</div>
+        <div class="sub">สร้าง QR สำหรับลิงก์ไฟล์ ใส่ข้อความ/โลโก้/overlay และดาวน์โหลดได้ทันที</div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button id="btnRandom" class="btn btn-ghost" type="button" title="สุ่มตัวอย่าง">ตัวอย่าง</button>
+      <button id="btnDownload" class="btn btn-primary" type="button">ดาวน์โหลด PNG</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="panel">
+      <div class="card">
+        <div class="cardHeader">
+          <h2>ข้อมูลที่จะเข้ารหัส</h2>
+          <p>วางลิงก์ไฟล์หรือข้อความ แล้วเลือกโหมดการเข้ารหัส</p>
+        </div>
+
+        <div class="form">
+          <label class="field">
+            <span class="label">Link / Text</span>
+            <input id="inputData" type="url" inputmode="url" placeholder="https://..." autocomplete="off" />
+            <span class="hint">รองรับ URL / ข้อความทั่วไป (Google Drive, OneDrive, Dropbox, เว็บไซต์ ฯลฯ)</span>
+          </label>
+
+          <div class="row">
+            <label class="field">
+              <span class="label">โหมด</span>
+              <select id="mode">
+                <option value="urlOnly">Encode: URL อย่างเดียว</option>
+                <option value="urlPlusNote">Encode: URL + Note (อยู่ใน QR)</option>
+              </select>
+              <span class="hint">โหมด URL+Note สแกนแล้วจะแสดงทั้ง URL และ Note</span>
+            </label>
+
+            <label class="field">
+              <span class="label">Caption (แสดงใต้รูป QR)</span>
+              <input id="caption" type="text" placeholder="เช่น ชื่อไฟล์ / ชื่อแผนก / ข้อความสั้น" autocomplete="off" />
+              <span class="hint">Caption ไม่ได้เข้ารหัสใน QR (แค่โชว์ใต้รูป)</span>
+            </label>
+          </div>
+
+          <label class="field" id="noteWrap">
+            <span class="label">Note (เข้ารหัสใน QR)</span>
+            <textarea id="note" rows="3" placeholder="เช่น เอกสารแนบ: แนวทางการใช้ยา / ติดต่อ: แผนกเภสัช"></textarea>
+            <span class="hint">ควรสั้นเพื่อสแกนได้เร็ว</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="cardHeader">
+          <h2>ตกแต่ง QR</h2>
+          <p>ใส่โลโก้ ปรับสี รูปแบบจุด และ Text Overlay (1/2 บรรทัด)</p>
+        </div>
+
+        <div class="form">
+          <div class="row">
+            <label class="field">
+              <span class="label">รูปแบบจุด</span>
+              <select id="dotStyle">
+                <option value="rounded">Rounded</option>
+                <option value="dots">Dots</option>
+                <option value="classy">Classy</option>
+                <option value="classy-rounded">Classy Rounded</option>
+                <option value="square">Square</option>
+                <option value="extra-rounded">Extra Rounded</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span class="label">Error Correction</span>
+              <select id="ecc">
+                <option value="Q">Q (แนะนำสำหรับใส่โลโก้)</option>
+                <option value="H">H (ทนทานสุด แต่แน่นขึ้น)</option>
+                <option value="M">M</option>
+                <option value="L">L</option>
+              </select>
+              <span class="hint">ถ้าใส่โลโก้/overlay แนะนำ Q หรือ H</span>
+            </label>
+          </div>
+
+          <div class="row">
+            <label class="field">
+              <span class="label">สี QR</span>
+              <input id="colorDots" type="color" value="#0b1020" />
+            </label>
+
+            <label class="field">
+              <span class="label">สีพื้นหลัง</span>
+              <input id="colorBg" type="color" value="#ffffff" />
+            </label>
+
+            <label class="field">
+              <span class="label">ขนาด (px)</span>
+              <input id="size" type="number" min="240" max="1024" step="10" value="360" />
+              <span class="hint">เหมาะสำหรับแชร์/พิมพ์: 320–512px</span>
+            </label>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="row">
+            <div class="field">
+              <span class="label">Logo (อัปโหลด)</span>
+
+              <div class="dropzone" id="dropzone">
+                <input id="logoInput" type="file" accept="image/*" />
+                <div class="dzText">
+                  <div class="dzTitle">ลากรูปมาวาง หรือกดเลือกไฟล์</div>
+                  <div class="dzHint">PNG/JPG/SVG (แนะนำ PNG พื้นหลังโปร่งใส)</div>
+                </div>
+              </div>
+
+              <div class="row compact">
+                <label class="field">
+                  <span class="label">ขนาดโลโก้</span>
+                  <input id="logoSize" type="range" min="0" max="60" value="22" />
+                  <span class="hint"><span id="logoSizeVal">22</span>%</span>
+                </label>
+
+                <label class="field">
+                  <span class="label">ลบโลโก้</span>
+                  <button id="btnClearLogo" class="btn btn-ghost" type="button">Clear</button>
+                </label>
+              </div>
+
+              <span class="hint">โลโก้จะถูกวางกลาง QR พร้อม padding เพื่อให้อ่านง่าย</span>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <!-- Text Overlay -->
+          <div class="row">
+            <label class="field">
+              <span class="label">Text overlay</span>
+              <div class="switch">
+                <input id="overlayEnabled" type="checkbox" />
+                <span class="slider"></span>
+                <span class="switchText">เปิดการทับข้อความบน QR</span>
+              </div>
+              <span class="hint">แนะนำตำแหน่ง Bottom + พื้นหลังโปร่งเล็กน้อย เพื่อสแกนง่าย</span>
+            </label>
+          </div>
+
+          <div id="overlayWrap" class="overlayWrap">
+            <label class="field">
+              <span class="label">Title (ข้อความบรรทัดที่ 1)</span>
+              <input id="overlayText" type="text" placeholder="เช่น ชื่อไฟล์ / แผนก / เวอร์ชันเอกสาร" autocomplete="off" />
+              <span class="hint">ควรสั้น (10–30 ตัวอักษร) เพื่อไม่บัง QR มากเกินไป</span>
+            </label>
+
+            <div class="row">
+              <label class="field">
+                <span class="label">จำนวนบรรทัด</span>
+                <select id="overlayLines">
+                  <option value="1">1 บรรทัด</option>
+                  <option value="2">2 บรรทัด (Title + Subtitle)</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span class="label">ขนาดฟอนต์ (Title)</span>
+                <input id="overlayFont" type="range" min="10" max="40" value="18" />
+                <span class="hint"><span id="overlayFontVal">18</span>px</span>
+              </label>
+            </div>
+
+            <label class="field" id="overlaySubWrap">
+              <span class="label">Subtitle (บรรทัดที่ 2)</span>
+              <input id="overlaySubText" type="text" placeholder="เช่น วันที่อัปเดต / หน่วยงาน / เวอร์ชัน" autocomplete="off" />
+              <span class="hint">แนะนำสั้นๆ เพื่อไม่บัง QR</span>
+            </label>
+
+            <div class="row">
+              <label class="field">
+                <span class="label">ตำแหน่ง</span>
+                <select id="overlayPos">
+                  <option value="bottom">Bottom (แนะนำ)</option>
+                  <option value="top">Top</option>
+                  <option value="center">Center</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span class="label">สีข้อความ</span>
+                <input id="overlayTextColor" type="color" value="#0b1020" />
+              </label>
+
+              <label class="field">
+                <span class="label">สีพื้นหลังข้อความ</span>
+                <input id="overlayBgColor" type="color" value="#ffffff" />
+              </label>
+            </div>
+
+            <div class="row">
+              <label class="field">
+                <span class="label">ความทึบพื้นหลัง</span>
+                <input id="overlayBgOpacity" type="range" min="0" max="100" value="85" />
+                <span class="hint"><span id="overlayBgOpacityVal">85</span>%</span>
+              </label>
+
+              <label class="field">
+                <span class="label">Padding</span>
+                <input id="overlayPad" type="range" min="6" max="28" value="12" />
+                <span class="hint"><span id="overlayPadVal">12</span>px</span>
+              </label>
+
+              <label class="field">
+                <span class="label">มุมโค้ง</span>
+                <input id="overlayRadius" type="range" min="0" max="22" value="14" />
+                <span class="hint"><span id="overlayRadiusVal">14</span>px</span>
+              </label>
+            </div>
+          </div>
+          <!-- /Text Overlay -->
+
+        </div>
+      </div>
+    </section>
+
+    <aside class="preview">
+      <div class="previewCard">
+        <div class="previewTop">
+          <div>
+            <div class="previewTitle">Preview</div>
+            <div class="previewSub" id="previewSub">ยังไม่มีข้อมูล</div>
+          </div>
+          <button id="btnCopyText" class="btn btn-ghost" type="button" title="คัดลอกข้อความที่เข้ารหัส">Copy</button>
+        </div>
+
+        <div class="qrWrap">
+          <div id="qrCanvas" class="qrCanvas" aria-label="QR code preview"></div>
+        </div>
+
+        <div class="caption" id="captionView"></div>
+
+        <div class="tips">
+          <div class="tip">
+            <span class="dot"></span>
+            <span>ถ้าสแกนยาก: เพิ่มขนาด, ใช้พื้นหลังขาว, หรือปรับ ECC เป็น H</span>
+          </div>
+          <div class="tip">
+            <span class="dot"></span>
+            <span>โลโก้/overlay ใหญ่เกินไปอาจทำให้สแกนไม่ติด (แนะนำโลโก้ 18–28%)</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="footerNote">
+        <span>Deploy ได้ด้วย GitHub Pages • ไม่มี backend • ทำงานบน Browser 100%</span>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="footer">
+    <span>© <span id="year"></span> QR Generator • Built for GitHub Pages</span>
+  </footer>
+
+  <script src="./app.js"></script>
+</body>
+</html>
