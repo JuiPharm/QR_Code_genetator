@@ -4,6 +4,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>QR Code Generator</title>
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+
   <link rel="stylesheet" href="./styles.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -27,6 +31,8 @@
 
     <div class="actions">
       <button id="btnRandom" class="btn btn-ghost" type="button" title="สุ่มตัวอย่าง">ตัวอย่าง</button>
+      <button id="btnCopyPng" class="btn btn-ghost" type="button" title="Copy PNG to clipboard">Copy PNG</button>
+      <button id="btnDownloadSvg" class="btn btn-ghost" type="button" title="ดาวน์โหลดเป็น SVG">ดาวน์โหลด SVG</button>
       <button id="btnDownload" class="btn btn-primary" type="button">ดาวน์โหลด PNG</button>
     </div>
   </header>
@@ -169,9 +175,9 @@
 
           <div id="overlayWrap" class="overlayWrap">
             <label class="field">
-              <span class="label">Title (ข้อความบรรทัดที่ 1)</span>
+              <span class="label">Title (บรรทัดที่ 1)</span>
               <input id="overlayText" type="text" placeholder="เช่น ชื่อไฟล์ / แผนก / เวอร์ชันเอกสาร" autocomplete="off" />
-              <span class="hint">ควรสั้น (10–30 ตัวอักษร) เพื่อไม่บัง QR มากเกินไป</span>
+              <span class="hint">ควรสั้น เพื่อไม่บัง QR มากเกินไป</span>
             </label>
 
             <div class="row">
@@ -250,7 +256,7 @@
             <div class="previewTitle">Preview</div>
             <div class="previewSub" id="previewSub">ยังไม่มีข้อมูล</div>
           </div>
-          <button id="btnCopyText" class="btn btn-ghost" type="button" title="คัดลอกข้อความที่เข้ารหัส">Copy</button>
+          <button id="btnCopyText" class="btn btn-ghost" type="button" title="คัดลอกข้อความที่เข้ารหัส">Copy Text</button>
         </div>
 
         <div class="qrWrap">

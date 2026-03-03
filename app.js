@@ -1,7 +1,8 @@
 /* QR Generator - Static Web App (GitHub Pages)
- * - Uses qr-code-styling library
- * - Supports: URL, URL+Note in QR, caption under QR, logo overlay, styling
- * - Adds Text Overlay (1 or 2 lines) composited via a top canvas for preview + download
+ * - qr-code-styling
+ * - Logo
+ * - Text Overlay (1/2 lines) composited in canvas for preview + PNG download + Copy PNG
+ * - SVG download with overlay: measures text width accurately via Canvas after fonts are ready
  */
 
 const $ = (id) => document.getElementById(id);
@@ -49,6 +50,8 @@ const els = {
   previewSub: $("previewSub"),
 
   btnDownload: $("btnDownload"),
+  btnDownloadSvg: $("btnDownloadSvg"),
+  btnCopyPng: $("btnCopyPng"),
   btnCopyText: $("btnCopyText"),
   btnRandom: $("btnRandom"),
 
@@ -62,12 +65,10 @@ let currentLogoDataUrl = null;
 function safeTrim(v) {
   return (v ?? "").toString().trim();
 }
-
 function toInt(v, def) {
   const n = Number.parseInt(v, 10);
   return Number.isFinite(n) ? n : def;
 }
-
 function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
 }
@@ -97,7 +98,6 @@ function updateOverlayVisibility() {
     els.overlaySubWrap.style.display = (on && lines === "2") ? "flex" : "none";
   }
 
-  // default title = caption (ถ้าเปิด overlay แล้ว title ยังว่าง)
   if (on && !safeTrim(els.overlayText.value) && safeTrim(els.caption.value)) {
     els.overlayText.value = safeTrim(els.caption.value);
   }
@@ -107,6 +107,21 @@ function inferPreviewSubtitle(encoded) {
   if (!encoded) return "ยังไม่มีข้อมูล";
   const firstLine = encoded.split("\n")[0];
   return firstLine.length > 48 ? firstLine.slice(0, 48) + "…" : firstLine;
+}
+
+function syncOverlayLabels() {
+  els.overlayFontVal.textContent = String(toInt(els.overlayFont.value, 18));
+  els.overlayBgOpacityVal.textContent = String(toInt(els.overlayBgOpacity.value, 85));
+  els.overlayPadVal.textContent = String(toInt(els.overlayPad.value, 12));
+  els.overlayRadiusVal.textContent = String(toInt(els.overlayRadius.value, 14));
+}
+
+function overlayIsOn() {
+  const on = !!els.overlayEnabled.checked;
+  if (!on) return false;
+  const title = safeTrim(els.overlayText.value);
+  const sub = safeTrim(els.overlaySubText.value);
+  return (els.overlayLines.value === "2") ? (!!title || !!sub) : !!title;
 }
 
 const qr = new QRCodeStyling({
@@ -123,7 +138,7 @@ const qr = new QRCodeStyling({
 
 qr.append(els.qrCanvas);
 
-// --- Overlay canvas layer ---
+// --- Overlay canvas layer (for preview + PNG + clipboard) ---
 let baseCanvas = null;
 let overlayCanvas = document.createElement("canvas");
 overlayCanvas.setAttribute("aria-label", "QR code with overlay");
@@ -133,7 +148,6 @@ overlayCanvas.style.display = "block";
 function findBaseCanvas() {
   baseCanvas = els.qrCanvas.querySelector("canvas");
   if (baseCanvas) {
-    // Hide base QR canvas, show overlay canvas instead
     baseCanvas.style.display = "none";
     if (!overlayCanvas.parentElement) els.qrCanvas.appendChild(overlayCanvas);
   }
@@ -150,76 +164,81 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-function renderOverlay() {
-  findBaseCanvas();
-  if (!baseCanvas) return;
-
-  const enabled = !!els.overlayEnabled.checked;
+function computeOverlayLines() {
   const linesMode = els.overlayLines?.value || "1";
-
   const title = safeTrim(els.overlayText.value);
-  const sub = safeTrim(els.overlaySubText?.value);
+  const sub = safeTrim(els.overlaySubText.value);
 
-  const hasText = linesMode === "2" ? (!!title || !!sub) : !!title;
+  const lines = [];
+  if (title) lines.push({ kind: "title", text: title });
+  if (linesMode === "2" && sub) lines.push({ kind: "sub", text: sub });
 
-  const size = baseCanvas.width;
-  overlayCanvas.width = size;
-  overlayCanvas.height = size;
+  if (linesMode === "2" && !title && sub) {
+    return [{ kind: "title", text: sub }]; // fallback single line
+  }
+  return lines.length ? lines : [];
+}
 
-  const ctx = overlayCanvas.getContext("2d");
-  ctx.clearRect(0, 0, size, size);
+// Shared font measurement context for "accurate 100%" SVG box width
+const measureCanvas = document.createElement("canvas");
+const measureCtx = measureCanvas.getContext("2d", { willReadFrequently: false });
 
-  // Draw base QR first
-  ctx.drawImage(baseCanvas, 0, 0);
+function setMeasureFont(kind, px) {
+  // Must match SVG font-family + weight used in renderOverlay.
+  if (kind === "sub") {
+    measureCtx.font = `700 ${px}px Inter, system-ui, sans-serif`;
+  } else {
+    measureCtx.font = `800 ${px}px Inter, system-ui, sans-serif`;
+  }
+}
 
-  if (!enabled || !hasText) return;
+async function ensureFontsReady() {
+  // Wait until Inter font is ready (important for accurate width)
+  try {
+    if (document.fonts && document.fonts.ready) {
+      await document.fonts.ready;
+      // Also "touch" a font load to reduce race on some browsers
+      await document.fonts.load("800 18px Inter");
+      await document.fonts.load("700 14px Inter");
+    }
+  } catch {
+    // ignore
+  }
+}
 
-  // Overlay params
-  const pos = els.overlayPos.value; // bottom/top/center
+function computeOverlayLayout(size) {
+  // Returns null if no overlay text
+  const enabled = !!els.overlayEnabled.checked;
+  if (!enabled) return null;
+
+  const lines = computeOverlayLines();
+  if (!lines.length) return null;
+
+  const pos = els.overlayPos.value;
   const pad = clamp(toInt(els.overlayPad.value, 12), 6, 28);
   const radius = clamp(toInt(els.overlayRadius.value, 14), 0, 22);
   const fg = els.overlayTextColor.value;
   const bg = els.overlayBgColor.value;
   const bgOpacity = clamp(toInt(els.overlayBgOpacity.value, 85), 0, 100) / 100;
 
-  // Safe margin from edges
-  const safeMargin = Math.round(size * 0.06); // 6%
+  const safeMargin = Math.round(size * 0.06);
   const maxW = size - safeMargin * 2;
 
-  // Typography
   const baseTitlePx = clamp(toInt(els.overlayFont.value, 18), 10, 40);
   const lineGap = Math.max(2, Math.round(baseTitlePx * 0.22));
 
-  const setTitleFont = (px) => { ctx.font = `800 ${px}px Inter, system-ui, sans-serif`; };
-  const setSubFont = (px) => { ctx.font = `700 ${px}px Inter, system-ui, sans-serif`; };
-
-  // Build lines
-  const lines = [];
-  if (title) lines.push({ kind: "title", text: title });
-
-  if (linesMode === "2" && sub) {
-    lines.push({ kind: "sub", text: sub });
-  }
-
-  // If user selected 2 lines but provided only subtitle, render it anyway.
-  if (linesMode === "2" && !title && sub) {
-    lines.unshift({ kind: "title", text: sub }); // render as title style for better readability
-    lines.pop(); // ensure single line if only subtitle
-  }
-
-  // Autoshrink: ensure longest line fits maxW - pad*2
   let titlePx = baseTitlePx;
   let subPx = Math.max(10, Math.round(titlePx * 0.78));
 
-  function measureMaxLineWidth() {
+  const measureMaxLineWidth = () => {
     let w = 0;
     for (const ln of lines) {
-      if (ln.kind === "title") setTitleFont(titlePx);
-      else setSubFont(subPx);
-      w = Math.max(w, ctx.measureText(ln.text).width);
+      const px = (ln.kind === "sub") ? subPx : titlePx;
+      setMeasureFont(ln.kind, px);
+      w = Math.max(w, measureCtx.measureText(ln.text).width);
     }
     return w;
-  }
+  };
 
   let maxLineW = measureMaxLineWidth();
   while (maxLineW > (maxW - pad * 2) && titlePx > 12) {
@@ -228,16 +247,9 @@ function renderOverlay() {
     maxLineW = measureMaxLineWidth();
   }
 
-  // Compute content height
   const titleH = Math.round(titlePx * 1.15);
   const subH = Math.round(subPx * 1.10);
-
-  let contentH = 0;
-  if (lines.length <= 1) {
-    contentH = titleH;
-  } else {
-    contentH = titleH + lineGap + subH;
-  }
+  const contentH = (lines.length <= 1) ? titleH : (titleH + lineGap + subH);
 
   const boxW = clamp(Math.round(maxLineW + pad * 2), 0, maxW);
   const boxH = Math.round(contentH + pad * 1.2);
@@ -248,34 +260,67 @@ function renderOverlay() {
   else if (pos === "center") y = Math.round((size - boxH) / 2);
   else y = size - safeMargin - boxH;
 
-  // Background
+  // Text baselines
+  const topY = y + Math.round(boxH / 2) - Math.round(contentH / 2);
+
+  return {
+    lines,
+    pos,
+    pad,
+    radius,
+    fg,
+    bg,
+    bgOpacity,
+    safeMargin,
+    maxW,
+    titlePx,
+    subPx,
+    lineGap,
+    box: { x, y, w: boxW, h: boxH },
+    content: { topY, contentH, titleH, subH },
+  };
+}
+
+function renderOverlay() {
+  findBaseCanvas();
+  if (!baseCanvas) return;
+
+  const size = baseCanvas.width;
+  overlayCanvas.width = size;
+  overlayCanvas.height = size;
+
+  const ctx = overlayCanvas.getContext("2d");
+  ctx.clearRect(0, 0, size, size);
+
+  ctx.drawImage(baseCanvas, 0, 0);
+
+  const layout = computeOverlayLayout(size);
+  if (!layout) return;
+
+  const { box, fg, bg, bgOpacity, radius, lines, titlePx, subPx, lineGap, content } = layout;
+
   ctx.save();
   ctx.globalAlpha = bgOpacity;
   ctx.fillStyle = bg;
-  roundRect(ctx, x, y, boxW, boxH, radius);
+  roundRect(ctx, box.x, box.y, box.w, box.h, radius);
   ctx.fill();
   ctx.restore();
 
-  // Text
   ctx.fillStyle = fg;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
 
   const cx = Math.round(size / 2);
-  const topY = y + Math.round(boxH / 2) - Math.round(contentH / 2);
 
   if (lines.length <= 1) {
-    setTitleFont(titlePx);
-    const yy = Math.round(topY + contentH / 2);
-    ctx.fillText(lines[0]?.text || title, cx, yy);
+    ctx.font = `800 ${titlePx}px Inter, system-ui, sans-serif`;
+    ctx.fillText(lines[0].text, cx, Math.round(content.topY + content.contentH / 2));
   } else {
-    setTitleFont(titlePx);
-    const y1 = Math.round(topY + titleH / 2);
-    ctx.fillText(lines[0].text, cx, y1);
+    ctx.font = `800 ${titlePx}px Inter, system-ui, sans-serif`;
+    ctx.fillText(lines[0].text, cx, Math.round(content.topY + content.titleH / 2));
 
-    setSubFont(subPx);
-    const y2 = Math.round(topY + titleH + lineGap + subH / 2);
-    ctx.fillText(lines[1].text, cx, y2);
+    ctx.font = `700 ${subPx}px Inter, system-ui, sans-serif`;
+    ctx.fillText(lines[1].text, cx, Math.round(content.topY + content.titleH + lineGap + content.subH / 2));
   }
 }
 
@@ -297,13 +342,12 @@ function applyQR() {
   els.captionView.textContent = caption;
   els.previewSub.textContent = inferPreviewSubtitle(encoded);
 
-  // imageSize fraction (0..0.6)
   const imageSize = Math.min(Math.max(logoPct / 100, 0), 0.6);
 
   qr.update({
     width: size,
     height: size,
-    data: encoded || " ", // avoid empty
+    data: encoded || " ",
     dotsOptions: { type: dotStyle, color: colorDots },
     backgroundOptions: { color: colorBg },
     qrOptions: { errorCorrectionLevel: ecc },
@@ -315,7 +359,6 @@ function applyQR() {
     },
   });
 
-  // Render overlay in next frame after base canvas updated
   requestAnimationFrame(() => renderOverlay());
 }
 
@@ -334,8 +377,7 @@ async function handleLogoFile(file) {
     alert("กรุณาอัปโหลดไฟล์รูปภาพเท่านั้น (PNG/JPG/SVG)");
     return;
   }
-  const dataUrl = await readFileAsDataURL(file);
-  currentLogoDataUrl = dataUrl;
+  currentLogoDataUrl = await readFileAsDataURL(file);
   applyQR();
 }
 
@@ -345,6 +387,7 @@ function clearLogo() {
   applyQR();
 }
 
+/* ---------- PNG download (with overlay if enabled) ---------- */
 function downloadPNG() {
   const encoded = buildEncodedText();
   if (!encoded) {
@@ -353,15 +396,9 @@ function downloadPNG() {
     return;
   }
 
-  // Ensure latest composite
   renderOverlay();
 
-  const overlayOn = !!els.overlayEnabled.checked && (
-    safeTrim(els.overlayText.value) ||
-    (els.overlayLines.value === "2" && safeTrim(els.overlaySubText.value))
-  );
-
-  if (overlayOn && overlayCanvas.width > 0) {
+  if (overlayIsOn() && overlayCanvas.width > 0) {
     const a = document.createElement("a");
     a.download = "qr-code.png";
     a.href = overlayCanvas.toDataURL("image/png");
@@ -369,10 +406,178 @@ function downloadPNG() {
     return;
   }
 
-  // fallback: original library download
   qr.download({ name: "qr-code", extension: "png" });
 }
 
+/* ---------- Copy PNG to clipboard ---------- */
+async function copyPNGToClipboard() {
+  const encoded = buildEncodedText();
+  if (!encoded) {
+    alert("กรุณาใส่ Link / Text ก่อนทำ Copy PNG");
+    els.inputData.focus();
+    return;
+  }
+
+  if (!navigator.clipboard || typeof ClipboardItem === "undefined") {
+    alert("Browser นี้ไม่รองรับ Copy รูปภาพไป clipboard (แนะนำ Chrome/Edge ล่าสุด)");
+    return;
+  }
+
+  try {
+    let blob;
+
+    if (overlayIsOn()) {
+      renderOverlay();
+      blob = await new Promise((resolve) => overlayCanvas.toBlob(resolve, "image/png"));
+    } else {
+      blob = await qr.getRawData("png");
+    }
+
+    if (!blob) throw new Error("PNG blob not available");
+
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+
+    const old = els.btnCopyPng.textContent;
+    els.btnCopyPng.textContent = "Copied!";
+    setTimeout(() => (els.btnCopyPng.textContent = old), 900);
+  } catch (e) {
+    console.error(e);
+    alert("Copy PNG ไม่สำเร็จ (บางระบบต้องอนุญาต clipboard หรือใช้ HTTPS เท่านั้น)");
+  }
+}
+
+/* ---------- SVG download (overlay width measured accurately) ---------- */
+function hexToRgb(hex) {
+  const h = (hex || "").replace("#", "").trim();
+  if (h.length !== 6) return { r: 0, g: 0, b: 0 };
+  return {
+    r: parseInt(h.slice(0, 2), 16),
+    g: parseInt(h.slice(2, 4), 16),
+    b: parseInt(h.slice(4, 6), 16),
+  };
+}
+
+function escapeXml(s) {
+  return (s ?? "")
+    .toString()
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
+async function downloadSVG() {
+  const encoded = buildEncodedText();
+  if (!encoded) {
+    alert("กรุณาใส่ Link / Text ก่อนดาวน์โหลด SVG");
+    els.inputData.focus();
+    return;
+  }
+
+  try {
+    await ensureFontsReady();
+
+    const svgBlob = await qr.getRawData("svg");
+    const svgText = await svgBlob.text();
+
+    // No overlay: download as-is
+    if (!overlayIsOn()) {
+      const out = new Blob([svgText], { type: "image/svg+xml" });
+      const url = URL.createObjectURL(out);
+      const a = document.createElement("a");
+      a.download = "qr-code.svg";
+      a.href = url;
+      a.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    const size = clamp(toInt(els.size.value, 360), 240, 1024);
+    const layout = computeOverlayLayout(size);
+    if (!layout) {
+      const out = new Blob([svgText], { type: "image/svg+xml" });
+      const url = URL.createObjectURL(out);
+      const a = document.createElement("a");
+      a.download = "qr-code.svg";
+      a.href = url;
+      a.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(svgText, "image/svg+xml");
+    const svg = doc.documentElement;
+
+    svg.setAttribute("width", String(size));
+    svg.setAttribute("height", String(size));
+    if (!svg.getAttribute("viewBox")) {
+      svg.setAttribute("viewBox", `0 0 ${size} ${size}`);
+    }
+
+    const ns = "http://www.w3.org/2000/svg";
+    const gOverlay = doc.createElementNS(ns, "g");
+    gOverlay.setAttribute("id", "overlay");
+
+    // background rect
+    const rect = doc.createElementNS(ns, "rect");
+    rect.setAttribute("x", String(layout.box.x));
+    rect.setAttribute("y", String(layout.box.y));
+    rect.setAttribute("width", String(layout.box.w));
+    rect.setAttribute("height", String(layout.box.h));
+    rect.setAttribute("rx", String(layout.radius));
+    rect.setAttribute("ry", String(layout.radius));
+
+    const { r, g, b } = hexToRgb(layout.bg);
+    rect.setAttribute("fill", `rgba(${r},${g},${b},${layout.bgOpacity})`);
+    gOverlay.appendChild(rect);
+
+    // text nodes
+    const makeText = (text, x, y, fontSize, fontWeight) => {
+      const t = doc.createElementNS(ns, "text");
+      t.setAttribute("x", String(x));
+      t.setAttribute("y", String(y));
+      t.setAttribute("text-anchor", "middle");
+      t.setAttribute("dominant-baseline", "middle");
+      t.setAttribute("fill", layout.fg);
+      t.setAttribute("font-family", "Inter, system-ui, sans-serif");
+      t.setAttribute("font-size", String(fontSize));
+      t.setAttribute("font-weight", String(fontWeight));
+      t.textContent = text;
+      return t;
+    };
+
+    const cx = Math.round(size / 2);
+    if (layout.lines.length <= 1) {
+      const y = Math.round(layout.content.topY + layout.content.contentH / 2);
+      gOverlay.appendChild(makeText(layout.lines[0].text, cx, y, layout.titlePx, 800));
+    } else {
+      const y1 = Math.round(layout.content.topY + layout.content.titleH / 2);
+      const y2 = Math.round(layout.content.topY + layout.content.titleH + layout.lineGap + layout.content.subH / 2);
+      gOverlay.appendChild(makeText(layout.lines[0].text, cx, y1, layout.titlePx, 800));
+      gOverlay.appendChild(makeText(layout.lines[1].text, cx, y2, layout.subPx, 700));
+    }
+
+    svg.appendChild(gOverlay);
+
+    const serializer = new XMLSerializer();
+    const outText = serializer.serializeToString(svg);
+    const out = new Blob([outText], { type: "image/svg+xml" });
+
+    const url = URL.createObjectURL(out);
+    const a = document.createElement("a");
+    a.download = "qr-code.svg";
+    a.href = url;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    console.error(e);
+    alert("ดาวน์โหลด SVG ไม่สำเร็จ");
+  }
+}
+
+/* ---------- Copy encoded text ---------- */
 async function copyEncoded() {
   const encoded = buildEncodedText();
   if (!encoded) {
@@ -381,8 +586,9 @@ async function copyEncoded() {
   }
   try {
     await navigator.clipboard.writeText(encoded);
+    const old = els.btnCopyText.textContent;
     els.btnCopyText.textContent = "Copied!";
-    setTimeout(() => (els.btnCopyText.textContent = "Copy"), 900);
+    setTimeout(() => (els.btnCopyText.textContent = old), 900);
   } catch {
     prompt("คัดลอกข้อความนี้:", encoded);
   }
@@ -394,7 +600,6 @@ function fillExample() {
   els.note.value = "แนวทางการใช้ยา (อัปเดตล่าสุด)\nติดต่อ: แผนกเภสัช";
   els.caption.value = "เอกสารแนวทางการใช้ยา";
 
-  // overlay example
   els.overlayEnabled.checked = true;
   els.overlayLines.value = "2";
   els.overlayText.value = "แนวทางการใช้ยา";
@@ -407,14 +612,7 @@ function fillExample() {
   applyQR();
 }
 
-function syncOverlayLabels() {
-  els.overlayFontVal.textContent = String(toInt(els.overlayFont.value, 18));
-  els.overlayBgOpacityVal.textContent = String(toInt(els.overlayBgOpacity.value, 85));
-  els.overlayPadVal.textContent = String(toInt(els.overlayPad.value, 12));
-  els.overlayRadiusVal.textContent = String(toInt(els.overlayRadius.value, 14));
-}
-
-// Wire events (single place)
+// Wire events
 [
   els.inputData,
   els.mode,
@@ -427,7 +625,6 @@ function syncOverlayLabels() {
   els.size,
   els.logoSize,
 
-  // overlay controls
   els.overlayEnabled,
   els.overlayText,
   els.overlayLines,
@@ -443,12 +640,12 @@ function syncOverlayLabels() {
   el.addEventListener("input", () => {
     if (el === els.mode) updateNoteVisibility();
     if (el === els.overlayEnabled || el === els.overlayLines) updateOverlayVisibility();
-
     syncOverlayLabels();
     applyQR();
   });
 });
 
+// Logo upload
 els.logoInput.addEventListener("change", async (e) => {
   const file = e.target.files?.[0];
   await handleLogoFile(file);
@@ -470,12 +667,19 @@ els.dropzone.addEventListener("drop", async (e) => {
 });
 
 els.btnClearLogo.addEventListener("click", clearLogo);
+
+// Buttons
 els.btnDownload.addEventListener("click", downloadPNG);
+els.btnDownloadSvg.addEventListener("click", downloadSVG);
+els.btnCopyPng.addEventListener("click", copyPNGToClipboard);
 els.btnCopyText.addEventListener("click", copyEncoded);
 els.btnRandom.addEventListener("click", fillExample);
 
 // Init
-updateNoteVisibility();
-updateOverlayVisibility();
-syncOverlayLabels();
-applyQR();
+(async function init(){
+  updateNoteVisibility();
+  updateOverlayVisibility();
+  syncOverlayLabels();
+  await ensureFontsReady();
+  applyQR();
+})();
