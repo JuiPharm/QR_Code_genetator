@@ -54,6 +54,7 @@ const els = {
   btnCopyPng: $("btnCopyPng"),
   btnCopyText: $("btnCopyText"),
   btnRandom: $("btnRandom"),
+  btnUpdate: $("btnUpdate"),
 
   year: $("year"),
 };
@@ -719,6 +720,13 @@ els.btnDownloadSvg.addEventListener("click", downloadSVG);
 els.btnCopyPng.addEventListener("click", copyPNGToClipboard);
 els.btnCopyText.addEventListener("click", copyEncoded);
 els.btnRandom.addEventListener("click", fillExample);
+els.btnUpdate.addEventListener("click", () => {
+  // Manual update button
+  syncOverlayLabels();
+  updateNoteVisibility();
+  updateOverlayVisibility();
+  applyQR();
+});
 
 // Init
 (async function init(){
