@@ -137,6 +137,8 @@ const qr = new QRCodeStyling({
 });
 
 qr.append(els.qrCanvas);
+// Ensure preview shows immediately once the library creates the canvas
+ensureBaseCanvasAttached();
 
 // --- Overlay canvas layer (for preview + PNG + clipboard) ---
 let baseCanvas = null;
@@ -324,6 +326,35 @@ function renderOverlay() {
   }
 }
 
+
+function scheduleOverlayRender() {
+  // qr-code-styling renders asynchronously; do a double-rAF + fallback timeout
+  requestAnimationFrame(() => {
+    scheduleOverlayRender();
+  });
+  setTimeout(() => renderOverlay(), 60);
+}
+
+// Wait for base canvas to exist (first render) then ensure overlay canvas is shown
+function ensureBaseCanvasAttached() {
+  const tryAttach = () => {
+    findBaseCanvas();
+    if (baseCanvas) {
+      scheduleOverlayRender();
+      return true;
+    }
+    return false;
+  };
+
+  if (tryAttach()) return;
+
+  let tries = 0;
+  const t = setInterval(() => {
+    tries += 1;
+    if (tryAttach() || tries > 50) clearInterval(t); // ~2.5s max
+  }, 50);
+}
+
 function applyQR() {
   const encoded = buildEncodedText();
   const caption = safeTrim(els.caption.value);
@@ -359,7 +390,7 @@ function applyQR() {
     },
   });
 
-  requestAnimationFrame(() => renderOverlay());
+  scheduleOverlayRender();
 }
 
 function readFileAsDataURL(file) {
@@ -644,6 +675,20 @@ function fillExample() {
     applyQR();
   });
 });
+
+
+// Extra listeners: make preview update immediately on paste / change / keyup (some mobile browsers)
+[els.inputData, els.note, els.caption, els.overlayText, els.overlaySubText].forEach((el) => {
+  el.addEventListener("change", () => applyQR());
+  el.addEventListener("keyup", () => applyQR());
+  el.addEventListener("paste", () => {
+    // allow pasted text to land first
+    setTimeout(() => applyQR(), 0);
+  });
+});
+
+// When user picks a suggestion/autofill, some browsers may skip 'input'
+els.inputData.addEventListener("blur", () => applyQR());
 
 // Logo upload
 els.logoInput.addEventListener("change", async (e) => {
