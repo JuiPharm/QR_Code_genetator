@@ -3,9 +3,9 @@
  * - Logo
  * - Text Overlay (1/2 lines) composited in canvas for preview + PNG download + Copy PNG
  * - SVG download with overlay: measures text width accurately via Canvas after fonts are ready
+ * - Auto update QR when link/text/options/logo changes
  */
-
-const APP_VERSION = "20260303082315";
+const APP_VERSION = "2026060901";
 console.log("QR Generator version", APP_VERSION);
 
 const $ = (id) => document.getElementById(id);
@@ -16,13 +16,11 @@ const els = {
   noteWrap: $("noteWrap"),
   note: $("note"),
   caption: $("caption"),
-
   dotStyle: $("dotStyle"),
   ecc: $("ecc"),
   colorDots: $("colorDots"),
   colorBg: $("colorBg"),
   size: $("size"),
-
   logoInput: $("logoInput"),
   dropzone: $("dropzone"),
   logoSize: $("logoSize"),
@@ -51,14 +49,12 @@ const els = {
   qrCanvas: $("qrCanvas"),
   captionView: $("captionView"),
   previewSub: $("previewSub"),
-
   btnDownload: $("btnDownload"),
   btnDownloadSvg: $("btnDownloadSvg"),
   btnCopyPng: $("btnCopyPng"),
   btnCopyText: $("btnCopyText"),
   btnRandom: $("btnRandom"),
   btnUpdate: $("btnUpdate"),
-
   year: $("year"),
 };
 
@@ -69,10 +65,12 @@ let currentLogoDataUrl = null;
 function safeTrim(v) {
   return (v ?? "").toString().trim();
 }
+
 function toInt(v, def) {
   const n = Number.parseInt(v, 10);
   return Number.isFinite(n) ? n : def;
 }
+
 function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
 }
@@ -80,8 +78,8 @@ function clamp(n, a, b) {
 function buildEncodedText() {
   const data = safeTrim(els.inputData.value);
   const note = safeTrim(els.note.value);
-  if (!data) return "";
 
+  if (!data) return "";
   if (els.mode.value === "urlPlusNote" && note) {
     return `${data}\n${note}`;
   }
@@ -99,7 +97,7 @@ function updateOverlayVisibility() {
 
   const lines = els.overlayLines?.value || "1";
   if (els.overlaySubWrap) {
-    els.overlaySubWrap.style.display = (on && lines === "2") ? "flex" : "none";
+    els.overlaySubWrap.style.display = on && lines === "2" ? "flex" : "none";
   }
 
   if (on && !safeTrim(els.overlayText.value) && safeTrim(els.caption.value)) {
@@ -123,10 +121,19 @@ function syncOverlayLabels() {
 function overlayIsOn() {
   const on = !!els.overlayEnabled.checked;
   if (!on) return false;
+
   const title = safeTrim(els.overlayText.value);
   const sub = safeTrim(els.overlaySubText.value);
-  return (els.overlayLines.value === "2") ? (!!title || !!sub) : !!title;
+  return els.overlayLines.value === "2" ? !!title || !!sub : !!title;
 }
+
+// --- Overlay canvas layer (for preview + PNG + clipboard) ---
+let baseCanvas = null;
+const overlayCanvas = document.createElement("canvas");
+overlayCanvas.dataset.role = "overlay";
+overlayCanvas.setAttribute("aria-label", "QR code with overlay");
+overlayCanvas.style.maxWidth = "100%";
+overlayCanvas.style.display = "block";
 
 const qr = new QRCodeStyling({
   width: 360,
@@ -140,26 +147,14 @@ const qr = new QRCodeStyling({
   imageOptions: { crossOrigin: "anonymous", margin: 8, imageSize: 0.35 },
 });
 
-qr.append(els.qrCanvas);
-// Ensure preview shows immediately once the library creates the canvas
-ensureBaseCanvasAttached();
-
-// --- Overlay canvas layer (for preview + PNG + clipboard) ---
-let baseCanvas = null;
-let overlayCanvas = document.createElement("canvas");
-overlayCanvas.dataset.role = "overlay";
-overlayCanvas.setAttribute("aria-label", "QR code with overlay");
-overlayCanvas.style.maxWidth = "100%";
-overlayCanvas.style.display = "block";
-
 function findBaseCanvas() {
   // qr-code-styling creates its own <canvas>. We also add our overlay <canvas>.
-  // querySelector("canvas") would pick the first one (often the overlay), so we must pick the non-overlay canvas.
+  // querySelector("canvas") would pick the first one (often the overlay), so pick the non-overlay canvas.
   const canvases = Array.from(els.qrCanvas.querySelectorAll("canvas"));
   baseCanvas = canvases.find((c) => c !== overlayCanvas && c.dataset.role !== "overlay") || null;
 
   if (baseCanvas) {
-    // Hide the library canvas and show overlay canvas instead
+    // Hide the library canvas and show overlay canvas instead.
     baseCanvas.style.display = "none";
     if (!overlayCanvas.parentElement) els.qrCanvas.appendChild(overlayCanvas);
   }
@@ -180,18 +175,19 @@ function computeOverlayLines() {
   const linesMode = els.overlayLines?.value || "1";
   const title = safeTrim(els.overlayText.value);
   const sub = safeTrim(els.overlaySubText.value);
-
   const lines = [];
+
   if (title) lines.push({ kind: "title", text: title });
   if (linesMode === "2" && sub) lines.push({ kind: "sub", text: sub });
 
   if (linesMode === "2" && !title && sub) {
-    return [{ kind: "title", text: sub }]; // fallback single line
+    return [{ kind: "title", text: sub }];
   }
+
   return lines.length ? lines : [];
 }
 
-// Shared font measurement context for "accurate 100%" SVG box width
+// Shared font measurement context for accurate SVG box width.
 const measureCanvas = document.createElement("canvas");
 const measureCtx = measureCanvas.getContext("2d", { willReadFrequently: false });
 
@@ -205,11 +201,10 @@ function setMeasureFont(kind, px) {
 }
 
 async function ensureFontsReady() {
-  // Wait until Inter font is ready (important for accurate width)
+  // Wait until Inter font is ready (important for accurate width).
   try {
     if (document.fonts && document.fonts.ready) {
       await document.fonts.ready;
-      // Also "touch" a font load to reduce race on some browsers
       await document.fonts.load("800 18px Inter");
       await document.fonts.load("700 14px Inter");
     }
@@ -219,7 +214,6 @@ async function ensureFontsReady() {
 }
 
 function computeOverlayLayout(size) {
-  // Returns null if no overlay text
   const enabled = !!els.overlayEnabled.checked;
   if (!enabled) return null;
 
@@ -232,10 +226,8 @@ function computeOverlayLayout(size) {
   const fg = els.overlayTextColor.value;
   const bg = els.overlayBgColor.value;
   const bgOpacity = clamp(toInt(els.overlayBgOpacity.value, 85), 0, 100) / 100;
-
   const safeMargin = Math.round(size * 0.06);
   const maxW = size - safeMargin * 2;
-
   const baseTitlePx = clamp(toInt(els.overlayFont.value, 18), 10, 40);
   const lineGap = Math.max(2, Math.round(baseTitlePx * 0.22));
 
@@ -245,7 +237,7 @@ function computeOverlayLayout(size) {
   const measureMaxLineWidth = () => {
     let w = 0;
     for (const ln of lines) {
-      const px = (ln.kind === "sub") ? subPx : titlePx;
+      const px = ln.kind === "sub" ? subPx : titlePx;
       setMeasureFont(ln.kind, px);
       w = Math.max(w, measureCtx.measureText(ln.text).width);
     }
@@ -253,26 +245,24 @@ function computeOverlayLayout(size) {
   };
 
   let maxLineW = measureMaxLineWidth();
-  while (maxLineW > (maxW - pad * 2) && titlePx > 12) {
+  while (maxLineW > maxW - pad * 2 && titlePx > 12) {
     titlePx -= 1;
     subPx = Math.max(10, Math.round(titlePx * 0.78));
     maxLineW = measureMaxLineWidth();
   }
 
   const titleH = Math.round(titlePx * 1.15);
-  const subH = Math.round(subPx * 1.10);
-  const contentH = (lines.length <= 1) ? titleH : (titleH + lineGap + subH);
-
+  const subH = Math.round(subPx * 1.1);
+  const contentH = lines.length <= 1 ? titleH : titleH + lineGap + subH;
   const boxW = clamp(Math.round(maxLineW + pad * 2), 0, maxW);
   const boxH = Math.round(contentH + pad * 1.2);
-
   const x = Math.round((size - boxW) / 2);
+
   let y;
   if (pos === "top") y = safeMargin;
   else if (pos === "center") y = Math.round((size - boxH) / 2);
   else y = size - safeMargin - boxH;
 
-  // Text baselines
   const topY = y + Math.round(boxH / 2) - Math.round(contentH / 2);
 
   return {
@@ -303,7 +293,6 @@ function renderOverlay() {
 
   const ctx = overlayCanvas.getContext("2d");
   ctx.clearRect(0, 0, size, size);
-
   ctx.drawImage(baseCanvas, 0, 0);
 
   const layout = computeOverlayLayout(size);
@@ -323,29 +312,37 @@ function renderOverlay() {
   ctx.textBaseline = "middle";
 
   const cx = Math.round(size / 2);
-
   if (lines.length <= 1) {
     ctx.font = `800 ${titlePx}px Inter, system-ui, sans-serif`;
     ctx.fillText(lines[0].text, cx, Math.round(content.topY + content.contentH / 2));
   } else {
     ctx.font = `800 ${titlePx}px Inter, system-ui, sans-serif`;
     ctx.fillText(lines[0].text, cx, Math.round(content.topY + content.titleH / 2));
-
     ctx.font = `700 ${subPx}px Inter, system-ui, sans-serif`;
     ctx.fillText(lines[1].text, cx, Math.round(content.topY + content.titleH + lineGap + content.subH / 2));
   }
 }
 
+let overlayRenderRaf = 0;
+let overlayRenderTimer = 0;
 
 function scheduleOverlayRender() {
-  // qr-code-styling renders asynchronously; do a double-rAF + fallback timeout
-  requestAnimationFrame(() => {
-    scheduleOverlayRender();
+  // qr-code-styling renders asynchronously; schedule one latest render only.
+  cancelAnimationFrame(overlayRenderRaf);
+  clearTimeout(overlayRenderTimer);
+
+  overlayRenderRaf = requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      renderOverlay();
+    });
   });
-  setTimeout(() => renderOverlay(), 60);
+
+  // Fallback for browsers where the QR canvas updates after rAF.
+  overlayRenderTimer = setTimeout(() => {
+    renderOverlay();
+  }, 80);
 }
 
-// Wait for base canvas to exist (first render) then ensure overlay canvas is shown
 function ensureBaseCanvasAttached() {
   const tryAttach = () => {
     findBaseCanvas();
@@ -368,7 +365,6 @@ function ensureBaseCanvasAttached() {
 function applyQR() {
   const encoded = buildEncodedText();
   const caption = safeTrim(els.caption.value);
-
   const size = clamp(toInt(els.size.value, 360), 240, 1024);
   els.size.value = String(size);
 
@@ -376,10 +372,9 @@ function applyQR() {
   const ecc = els.ecc.value;
   const colorDots = els.colorDots.value;
   const colorBg = els.colorBg.value;
-
   const logoPct = clamp(toInt(els.logoSize.value, 22), 0, 60);
-  els.logoSizeVal.textContent = String(logoPct);
 
+  els.logoSizeVal.textContent = String(logoPct);
   els.captionView.textContent = caption;
   els.previewSub.textContent = inferPreviewSubtitle(encoded);
 
@@ -403,6 +398,18 @@ function applyQR() {
   scheduleOverlayRender();
 }
 
+let qrUpdateTimer = 0;
+
+function scheduleQRUpdate(delay = 80) {
+  clearTimeout(qrUpdateTimer);
+  qrUpdateTimer = setTimeout(() => {
+    syncOverlayLabels();
+    updateNoteVisibility();
+    updateOverlayVisibility();
+    applyQR();
+  }, delay);
+}
+
 function readFileAsDataURL(file) {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
@@ -414,18 +421,20 @@ function readFileAsDataURL(file) {
 
 async function handleLogoFile(file) {
   if (!file) return;
+
   if (!file.type.startsWith("image/")) {
     alert("กรุณาอัปโหลดไฟล์รูปภาพเท่านั้น (PNG/JPG/SVG)");
     return;
   }
+
   currentLogoDataUrl = await readFileAsDataURL(file);
-  applyQR();
+  scheduleQRUpdate(0);
 }
 
 function clearLogo() {
   currentLogoDataUrl = null;
   if (toInt(els.logoSize.value, 22) > 28) els.logoSize.value = "22";
-  applyQR();
+  scheduleQRUpdate(0);
 }
 
 /* ---------- PNG download (with overlay if enabled) ---------- */
@@ -466,7 +475,6 @@ async function copyPNGToClipboard() {
 
   try {
     let blob;
-
     if (overlayIsOn()) {
       renderOverlay();
       blob = await new Promise((resolve) => overlayCanvas.toBlob(resolve, "image/png"));
@@ -491,6 +499,7 @@ async function copyPNGToClipboard() {
 function hexToRgb(hex) {
   const h = (hex || "").replace("#", "").trim();
   if (h.length !== 6) return { r: 0, g: 0, b: 0 };
+
   return {
     r: parseInt(h.slice(0, 2), 16),
     g: parseInt(h.slice(2, 4), 16),
@@ -522,7 +531,7 @@ async function downloadSVG() {
     const svgBlob = await qr.getRawData("svg");
     const svgText = await svgBlob.text();
 
-    // No overlay: download as-is
+    // No overlay: download as-is.
     if (!overlayIsOn()) {
       const out = new Blob([svgText], { type: "image/svg+xml" });
       const url = URL.createObjectURL(out);
@@ -536,6 +545,7 @@ async function downloadSVG() {
 
     const size = clamp(toInt(els.size.value, 360), 240, 1024);
     const layout = computeOverlayLayout(size);
+
     if (!layout) {
       const out = new Blob([svgText], { type: "image/svg+xml" });
       const url = URL.createObjectURL(out);
@@ -561,7 +571,6 @@ async function downloadSVG() {
     const gOverlay = doc.createElementNS(ns, "g");
     gOverlay.setAttribute("id", "overlay");
 
-    // background rect
     const rect = doc.createElementNS(ns, "rect");
     rect.setAttribute("x", String(layout.box.x));
     rect.setAttribute("y", String(layout.box.y));
@@ -574,7 +583,6 @@ async function downloadSVG() {
     rect.setAttribute("fill", `rgba(${r},${g},${b},${layout.bgOpacity})`);
     gOverlay.appendChild(rect);
 
-    // text nodes
     const makeText = (text, x, y, fontSize, fontWeight) => {
       const t = doc.createElementNS(ns, "text");
       t.setAttribute("x", String(x));
@@ -605,7 +613,6 @@ async function downloadSVG() {
     const serializer = new XMLSerializer();
     const outText = serializer.serializeToString(svg);
     const out = new Blob([outText], { type: "image/svg+xml" });
-
     const url = URL.createObjectURL(out);
     const a = document.createElement("a");
     a.download = "qr-code.svg";
@@ -625,8 +632,10 @@ async function copyEncoded() {
     alert("ยังไม่มีข้อความสำหรับคัดลอก");
     return;
   }
+
   try {
     await navigator.clipboard.writeText(encoded);
+
     const old = els.btnCopyText.textContent;
     els.btnCopyText.textContent = "Copied!";
     setTimeout(() => (els.btnCopyText.textContent = old), 900);
@@ -640,21 +649,16 @@ function fillExample() {
   els.mode.value = "urlPlusNote";
   els.note.value = "แนวทางการใช้ยา (อัปเดตล่าสุด)\nติดต่อ: แผนกเภสัช";
   els.caption.value = "เอกสารแนวทางการใช้ยา";
-
   els.overlayEnabled.checked = true;
   els.overlayLines.value = "2";
   els.overlayText.value = "แนวทางการใช้ยา";
-  els.overlaySubText.value = "Updated: 2026-03-03";
+  els.overlaySubText.value = "Updated: 2026-06-09";
   els.overlayPos.value = "bottom";
-
-  updateNoteVisibility();
-  updateOverlayVisibility();
-  syncOverlayLabels();
-  applyQR();
+  scheduleQRUpdate(0);
 }
 
-// Wire events
-[
+// Wire events - Auto update QR when link/text/options change.
+const autoUpdateControls = [
   els.inputData,
   els.mode,
   els.note,
@@ -665,7 +669,6 @@ function fillExample() {
   els.colorBg,
   els.size,
   els.logoSize,
-
   els.overlayEnabled,
   els.overlayText,
   els.overlayLines,
@@ -677,28 +680,26 @@ function fillExample() {
   els.overlayBgOpacity,
   els.overlayPad,
   els.overlayRadius,
-].forEach((el) => {
-  el.addEventListener("input", () => {
-    if (el === els.mode) updateNoteVisibility();
-    if (el === els.overlayEnabled || el === els.overlayLines) updateOverlayVisibility();
-    syncOverlayLabels();
-    applyQR();
+].filter(Boolean);
+
+autoUpdateControls.forEach((el) => {
+  ["input", "change"].forEach((eventName) => {
+    el.addEventListener(eventName, () => scheduleQRUpdate());
   });
 });
 
+// Paste: wait until pasted text lands in the field before updating.
+[els.inputData, els.note, els.caption, els.overlayText, els.overlaySubText]
+  .filter(Boolean)
+  .forEach((el) => {
+    el.addEventListener("paste", () => {
+      setTimeout(() => scheduleQRUpdate(0), 0);
+    });
 
-// Extra listeners: make preview update immediately on paste / change / keyup (some mobile browsers)
-[els.inputData, els.note, els.caption, els.overlayText, els.overlaySubText].forEach((el) => {
-  el.addEventListener("change", () => applyQR());
-  el.addEventListener("keyup", () => applyQR());
-  el.addEventListener("paste", () => {
-    // allow pasted text to land first
-    setTimeout(() => applyQR(), 0);
+    // Support autofill/mobile keyboard edge cases.
+    el.addEventListener("keyup", () => scheduleQRUpdate());
+    el.addEventListener("blur", () => scheduleQRUpdate(0));
   });
-});
-
-// When user picks a suggestion/autofill, some browsers may skip 'input'
-els.inputData.addEventListener("blur", () => applyQR());
 
 // Logo upload
 els.logoInput.addEventListener("change", async (e) => {
@@ -711,12 +712,15 @@ els.dropzone.addEventListener("dragover", (e) => {
   e.preventDefault();
   els.dropzone.style.borderColor = "rgba(124,92,255,.7)";
 });
+
 els.dropzone.addEventListener("dragleave", () => {
   els.dropzone.style.borderColor = "rgba(255,255,255,.18)";
 });
+
 els.dropzone.addEventListener("drop", async (e) => {
   e.preventDefault();
   els.dropzone.style.borderColor = "rgba(255,255,255,.18)";
+
   const file = e.dataTransfer?.files?.[0];
   await handleLogoFile(file);
 });
@@ -729,19 +733,15 @@ els.btnDownloadSvg.addEventListener("click", downloadSVG);
 els.btnCopyPng.addEventListener("click", copyPNGToClipboard);
 els.btnCopyText.addEventListener("click", copyEncoded);
 els.btnRandom.addEventListener("click", fillExample);
-els.btnUpdate.addEventListener("click", () => {
-  // Manual update button
-  syncOverlayLabels();
-  updateNoteVisibility();
-  updateOverlayVisibility();
-  applyQR();
-});
+els.btnUpdate.addEventListener("click", () => scheduleQRUpdate(0));
 
 // Init
-(async function init(){
+(async function init() {
+  qr.append(els.qrCanvas);
   updateNoteVisibility();
   updateOverlayVisibility();
   syncOverlayLabels();
   await ensureFontsReady();
   applyQR();
+  ensureBaseCanvasAttached();
 })();
